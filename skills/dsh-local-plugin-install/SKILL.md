@@ -1,195 +1,149 @@
 ---
 name: dsh-local-plugin-install
-description: 把本地插件安全装进 DSH：先审再装（CLI/UI 都能登记，手改是兑底）＋复验。触发：装本地插件、列表不出现、审计第三方包。
+description: Install a local plugin into DSH safely - audit first, then register (both CLI and UI can register; editing files by hand is only the fallback), then re-verify. Triggers: installing a local plugin, a plugin missing from the list, auditing a third-party package.
 ---
 
-> **这是脱敏公开版**；本机在用的那份在技能目录（更长、带内部附录），**两份别混**。
-> **公开版说明**：本文所有路径都是**占位符**（如 `<DSH 安装目录>`、`<DSH_HOME>\profiles\<profile>`、`<技能目录>`），照做时换成你自己机器的对应位置；流程与判据与机器无关。**产品实名（DeepSeek Harness / DSH / `@deepseek-ai/*`）保留**——这份就是给 DSH 用户写的，不隐去。
+> **This is the sanitized public version.** The copy actually in use on the author's machine lives in his skills directory (longer, with a private appendix). Do not mix the two.
+> **About paths:** every path below is a **placeholder** (`<DSH install dir>`, `<DSH_HOME>\profiles\<profile>`, `<skills dir>`). Substitute the location on your own machine; the procedure and the criteria are machine-independent. **Real product names are kept on purpose** (DeepSeek Harness / DSH / `@deepseek-ai/*`) - this pack is written for DSH users, so hiding them would only make it harder to follow.
 
-> ### 本包不含、需自备（照抄会撞「路径不存在」的四件事）
+> ### Not included in this pack (four things that will hit "path not found" if you copy them literally)
 >
-> | 缺的东西 | 被本文哪里引用 | 后果 |
+> | What is missing | Where this file refers to it | Consequence |
 > |---|---|---|
-> | 技能 `dsh-plugin-localization`（`scripts\dsh_plugin_title.mjs` + `assets\titles.json`） | §3.5 汉化、§收口 | 那两步跑不起来，只能自己照 §3.5 的**四条判据**手工做 |
-> | 你自己的 AGENTS 卡（引用了它 §0.7） | §5 排查表末行 | 那个编号在本文里不存在，按「易被冲刷的补丁」自己理解 |
-> | 仓里的 `install-receipts/` 目录 | §3.6 三个落点之一 | **落点只是作者的写法**：回单落在**你自己的仓/目录**即可 —— 回单这一步是**正路**（装完要能复盘），不是可选 |
-> | 备份区 `profile-@deepseek-ai-清理-*` 与 `00_目录导引.md` | §3 末「profile 已经被跑坏了」 | 那是作者本机的救命材料，你只能从**你自己的**备份里拷 |
+> | The skill `dsh-plugin-localization` (`scripts\dsh_plugin_title.mjs` + `assets\titles.json`) | section 3.5 (naming) and the closing section | Those two steps cannot run; do them by hand using the four criteria in 3.5 |
+> | Your own AGENTS card (this file cites its section 0.7) | last row of the table in section 5 | That number does not exist here; read it as "a patch that the host may wash away" |
+> | An `install-receipts/` directory in your repo | one of the three drop points in section 3.6 | **The drop point is only the author's own convention**: the receipt belongs in **your repo / your directory**. Writing the receipt is part of the procedure (you must be able to review the install later), not optional |
+> | Backup material named `profile-@deepseek-ai-cleanup-*` and `00_directory-guide.md` | the "profile already wrecked" paragraph at the end of section 3 | That is the author's own rescue material; restore from **your** backup instead |
 >
-> **读法**：对外能独立跑通的是 §0.0 审计 → §2 合格条件 → §3 三步登记 → §3.6 回单（落点你自己的目录）→ §4 验证顺序 → §5 排查表。§3.5 汉化与「profile 被跑坏了」那段引用作者本机材料，**当参考看**。
+> **How to read this file:** the parts that stand on their own externally are 0.0 audit -> 2 required layout -> 3 three-step registration -> 3.6 receipt (drop it in your own directory) -> 4 verification order -> 5 troubleshooting. Section 3.5 and the "profile wrecked" paragraph reference the author's machine; treat them as background.
 
-# 装本地源码插件（DSH）
+# Installing a local source plugin (DSH)
 
-## 0.0 先审计：市场能装，但插件不一定能装（2026-10-22 立，因实战炸机）
+## 0.0 Audit first: the marketplace lets you install, but the plugin may not be installable (set 2026-10-22, after a real breakage)
 
-> **来历**：从 dshmarket 直装 `dsh-auto-review` 把 DSH 装到**起不来**，且没有任何日志说明改了什么。
-> 真因（插件 CHANGELOG 0.13.8 / issue #74）：包把 **14 个 `@deepseek-ai/dsh-*` 宿主实现包**
-> 写成 runtime `dependencies`，pnpm 装到 profile 根后**顶掉宿主的 provider** →
-> `credentials`/`fs`/`subprocess`/`sandbox`/`sandboxPolicy`/`sessionPersistence`/`connection`
-> 全部无法激活 → 应用无法启动。市场给的是 ≤0.13.7，**它不会提示版本选错了**。
+> **Origin:** installing `dsh-auto-review` straight from dshmarket left DSH **unable to start**, and no log said what had been changed.
+> Real cause (the plugin's own CHANGELOG 0.13.8 / issue #74): the package declared **14 `@deepseek-ai/dsh-*` host implementation packages**
+> as runtime `dependencies`. pnpm put them at the profile root, where they **displaced the host's own providers** ->
+> `credentials` / `fs` / `subprocess` / `sandbox` / `sandboxPolicy` / `sessionPersistence` / `connection`
+> all failed to activate -> the app would not start. The marketplace served <=0.13.7 and **never warned that the version was wrong**.
 
-装任何第三方包之前，先跑同目录的 `audit-plugin-package.cjs`（只读，不改任何东西）：
+Before installing any third-party package, run `audit-plugin-package.cjs` from this same directory (read-only, it changes nothing):
 
-> **市场的插件没有"只下载"这个选项**——页面上就是直接装。所以想先审，只有两条路：
-> ① 源码包（GitHub / 本地目录）：先下到本地，审那个目录；
-> ② 市场页上的包：**绕过市场自己从 registry 取 `.tgz`** 审完再装（本脚本吃 `.tgz`）。
+> **The marketplace has no "download only" option** - the button installs. So if you want to audit first there are only two routes:
+> (a) a source package (GitHub / local directory): download it, then audit that directory;
+> (b) a package shown on the marketplace: **bypass the marketplace and pull the `.tgz` from the registry yourself**, audit it, then install (this script accepts `.tgz`).
 
 ```powershell
-& '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe' `
-  '<技能目录>\dsh-local-plugin-install\audit-plugin-package.cjs' <包目录或 .tgz>
+& '<DSH install dir>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe' `
+  '<skills dir>\dsh-local-plugin-install\audit-plugin-package.cjs' <package dir or .tgz>
 ```
 
-退出码：`0` 可装 / `1` 有条件（看 WARN）/ `2` 拒绍（BLOCKER）。
-最重要的一条是「`dependencies` 里有 `@deepseek-ai/*`」——**那就是能把 DSH 装到起不来的那种包。**
+Exit codes: `0` safe to install / `1` conditional (read the WARN lines) / `2` refuse (BLOCKER).
+The single most important check is "`dependencies` contains `@deepseek-ai/*`" - **that is the class of package that can leave DSH unable to start.**
 
-审计通过后，再按下面 §1–§3 做本地登记。
+Only after the audit passes, continue with sections 1-3 for local registration.
 
-## 0. 一句话
+## 0. One sentence
 
-**本地插件不用"安装"，只需要"登记"。** 文件已经在你硬盘上了，缺的是让宿主知道"有这么个东西、要加载它"。
+**A local plugin does not need to be "installed", it needs to be "registered".** The files are already on your disk; what is missing is telling the host "this thing exists, load it".
 
-## 1. 装插件是两件事（2026-11-02 复测修正本节旧结论）
+## 1. Installing a plugin is two separate things (corrected 2026-11-02 after re-testing; this supersedes the old version of this section)
 
-
-
-| 步骤 | 做什么 | 本地目录可行吗 |
-
+| Step | What it does | Possible from a local directory? |
 |---|---|---|
+| 1. put the files in place | `pnpm add <source>` (npm / tarball / `file:` local directory all work) | yes, pnpm supports all three |
+| 2. register it | the package name goes into `dsh.profile.bundles` in the profile's `package.json` | **both the CLI and the UI write this** (but re-verify, see below) |
 
-| ① 装文件 | `pnpm add <来源>`（npm / tarball / `file:` 本地目录都可以） | ✅ pnpm 三种都支持 |
+**The normal route (2026-11-02 re-test + source reading):**
 
-| ② 登记 | 包名写进 profile `package.json` 的 `dsh.profile.bundles` | ✅ **CLI 与 UI 都会写**（但必须复验，见下） |
+- **CLI**: `dsh plugin --profile <name> add file:<local dir>` - measured: it writes **both** `dependencies` and `dsh.profile.bundles`.
+- **UI**: Settings -> Plugins -> Add plugin accepts **an absolute path to a local directory** (`<drive>:/path/to/plugin`, with or without the `file:` prefix).
+  Source evidence: `parseInstallSpec` in `dsh-plugin-manager/lib/index.js` sorts input into five classes - registry / **path (local directory)** / tarball / git / relative path rejected.
+  The same file contains `bundles.push(name)` + `saveManifest` - **the UI writes the registration itself; you do not have to edit it by hand.**
+  The impression that it "can only go through the network" comes from two visual red herrings: the example placeholder is a package name, and the "install source / npm registry" dropdown only applies to package names - a local path never goes through it.
+- **Re-verify after running it**: read `package.json` again and confirm both places were written. If they were not, fall back to the manual registration in section 3.
 
+**Retired assertions:** this section used to claim that `dsh plugin add` only forwards to pnpm and **does not write bundles** ("installing it is the same as not installing it"), and that registration "has no UI and no CLI".
+**Both halves were wrong**: the CLI half was overturned by an isolated re-test on the morning of 2026-11-02, the UI half by reading the source the same day.
+**Where the misjudgment came from** (inference, not reproduced): it was tested on **a profile that had already been wrecked**. A live profile uses a hoisted flat layout plus an incomplete lock file; the pnpm run triggered by `add` fails or stops halfway on such a profile, so "it ran and nothing was written" was recorded as "the CLI does not do registration".
 
+That dshmarket recognizes `file:` dependencies still holds: it shows a "local development" badge, and when the path is dead it reports that the install source is a local path on another machine.
 
-**正路（2026-11-02 复测 + 源码实证）**
+## 1.5 Development mode: `--patch` points straight at the source, nothing to install (measured 2026-11-02)
 
-
-
-- **CLI**：`dsh plugin --profile <名字> add file:<本地目录>` —— 实测 `dependencies` 与 `dsh.profile.bundles` **两处都写**。
-
-- **UI**：「设置 → 插件 → 添加插件」输入框直接吃**本地目录绝对路径**（`<盘符>:/path/to/plugin` 或带 `file:` 前缀都行）。
-
-  源码实证：`dsh-plugin-manager/lib/index.js` 的 `parseInstallSpec` 把输入分五类——registry / **path（本地目录）** / tarball / git / 拒收相对路径；
-
-  同一文件里有 `bundles.push(name)` + `saveManifest`——**UI 自己就写登记，登记不用手改**。
-
-  它「看起来只能走网络」是两处视觉误导：示例占位符是包名 + 「安装源 / npm 镜像地址」下拉——那个只对包名生效，本地路径不经过它。
-
-- **跑完必须复验**：重读 `package.json`，确认两处都写了；没写全再回 §3 手改登记（兑底）。
-
-
-
-**旧断言作废**：本节早前写「`dsh plugin add` 只转发 pnpm、**不写 bundles** → 装了等于没装」「登记 ❌ **没有 UI，也没有 CLI**」——
-
-**两条都错**：CLI 那半在 2026-11-02 上午的隔离复测里被推翻，UI 那半在 2026-11-02 的源码实证里被推翻。
-
-**当年误判的来源**（推断，未复现）：在**炸坏的 profile** 上试——活 profile 是 hoisted 平铺布局 + 残缺 lock，
-
-add 触发的 pnpm 在它上面失败或半途而废，观察到的是「跑了没写进去」，被记成了「CLI 不做登记」。
-
-
-
-dshmarket 认识 `file:` 依赖这点仍然成立：给「本地开发」角标，路径失效时报"安装来源是另一台电脑上的本地路径"。
-
-
-
-## 1.5 开发态：`--patch` 直指源码，不用装（2026-11-02 实测）
-
-
-
-写插件调试期不必登记、不必复制进 node_modules——patch 的 `name` 直接写 **`.js` 文件绝对路径**：
-
-
+While writing and debugging a plugin you need neither registration nor a copy inside node_modules - the patch's `name` can be **the absolute path of a `.js` file**:
 
 ```yaml
-
-# dev/cordis.yml（正斜杠绝对路径）
-
+# dev/cordis.yml (forward slashes in the absolute path)
 - insert:
-
     - id: dev
-
-      name: '<盘符>:/path/to/my-plugin.js'
-
+      name: '<drive>:/path/to/my-plugin.js'
 ```
-
-
 
 ```powershell
-
-# 官方 CLI 包装（<DSH 安装目录>\resources\runtime\cli\bin\dsh.cmd）或直接指 asar 里的 cli.js
-
-& '<DSH 安装目录>\resources\runtime\cli\bin\dsh.cmd' --profile web --patch '<盘符>:/path/to/dev/cordis.yml'
-
+# the official CLI wrapper (<DSH install dir>\resources\runtime\cli\bin\dsh.cmd), or point at cli.js inside the asar
+& '<DSH install dir>\resources\runtime\cli\bin\dsh.cmd' --profile web --patch '<drive>:/path/to/dev/cordis.yml'
 ```
 
+Measured: in the `--dump-config` merged tree that `name` appears as an absolute-path URL starting with `file:` (i.e. `file:` + the absolute path of the plugin .js),
+and the profile's `package.json` is **not touched at all** (no `dependencies`, no `bundles`, no node_modules write). `--patch` can be repeated and stacks after the profile layer.
 
+**Positioning: for development.** Real plugins still go through the required layout in section 2 plus registration in section 3 - `--patch` disappears as soon as you start without it, and it gives you no marketplace badge, no locale naming, no packaging of the browser half.
 
-实测：`--dump-config` 组合树里那个 `name` 是以 `file:` 开头的绝对路径 URL（如 `file:` + 本地插件的 .js 绝对路径），
+## 2. Prerequisite: the plugin directory must pass
 
-且 profile 的 `package.json` **一字未动**（不落 dependencies、不落 bundles，不碰 node_modules）；`--patch` 可重复给，叠在 profile 层之后。
-
-
-
-**定位：开发调试用。** 正式插件仍走 §2 合格目录 + §3 登记——`--patch` 下次不带参数启动就没了，
-
-也没有市场角标 / locale 汉化 / 浏览器半边打包。
-
-## 2. 前置：插件目录必须合格
-
-缺一条就白装：
+Missing any one of these makes the install useless:
 
 ```jsonc
 // package.json
 {
-  "name": "dsh-xxx",                     // 必须与 bundles 里写的名字一致
+  "name": "dsh-xxx",                     // must match the name written in bundles
   "type": "module",
-  "main": "index.js",                    // 或 exports["."]
+  "main": "index.js",                    // or exports["."]
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js",           // 有浏览器半边才需要
-    "./locale/*.json": "./locale/*.json" // 有中文名才需要
+    "./client": "./client.js",           // needed only if there is a browser half
+    "./locale/*.json": "./locale/*.json" // needed only if there is a display name
   },
   "files": ["index.js", "client.js", "cordis.patch.yml", "locale"],
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }   // ← 缺这个必报 not-bundle
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }   // <-- missing this always reports not-bundle
 }
 ```
 
 ```
-插件目录/
-  cordis.patch.yml     ← 内容：- insert: [{ id: dsh-xxx, name: dsh-xxx }]
-  index.js             ← 宿主半边
-  client.js            ← 浏览器半边（可选）
-  locale/zh.json       ← 中文显示名（可选，但结构必须对！）
+plugin dir/
+  cordis.patch.yml     <- content: - insert: [{ id: dsh-xxx, name: dsh-xxx }]
+  index.js             <- host half
+  client.js            <- browser half (optional)
+  locale/zh.json       <- display name (optional, but the structure must be right!)
 ```
 
-**locale 的结构必须带 `meta` 包裹**（2026-10-22 实测踩坑，见 §5.1）：
+**The locale structure must be wrapped in `meta`** (measured pitfall, 2026-10-22; see 5.1):
 ```jsonc
-{ "meta": { "title": "插件显示名", "description": "一句话说明" } }
+{ "meta": { "title": "plugin display name", "description": "one line about what it does" } }
 ```
-写成 `{"name": ..., "description": ...}` 的话，**插件在「设置 → 插件」列表里完全不出现，
-且没有任何报错**——这是最难查的一个坑。
+Written as `{"name": ..., "description": ...}` instead, **the plugin does not appear in Settings -> Plugins at all, and nothing reports an error** - the hardest thing to find.
 
-**目录路径不能含中文**：pnpm 会以 GBK 回写成乱码。
+**The directory path must not contain non-ASCII characters**: pnpm writes such paths back as GBK garbage.
 
-## 3. 登记：CLI/UI 装（自动写登记）＋复验；手改是兑底（幂等，可重复执行）
+## 3. Registration: install via CLI/UI (they write the registration) + re-verify; editing by hand is the fallback (idempotent, safe to repeat)
 
-> **效果展示**：本包是命令行技能，无界面、无配图——它的效果就是终端里那份审计输出与登记后的 package.json。
-> **这是兑底路径**：正常装法是 §1 的 CLI / UI（它们会写登记），**只有这两处没写全时才手改下面这两处**。
-> 手改不是野路子，但它不是第一选择。
+> **What this looks like in effect:** this pack is a command-line skill - no UI, no screenshots. Its effect is the audit output in a terminal and the two lines written into `package.json`.
+> **This is the fallback path**: the normal install is the CLI / UI from section 1 (they write the registration). **Only edit the two places below if those did not both get written.**
+> Editing by hand is not a hack, but it is not the first choice.
 
-改 `<DSH_HOME>\profiles\<profile>\package.json` 两处 + 复制目录：
+Two edits in `<DSH_HOME>\profiles\<profile>\package.json` plus one directory copy:
 
 ```jsonc
 {
   "dependencies": {
-    "dsh-xxx": "file:<插件源码目录>/dsh-xxx"      // ① 依赖，指向源码目录
+    "dsh-xxx": "file:<plugin source dir>/dsh-xxx"      // (1) the dependency, pointing at the source directory
   },
   "dsh": {
     "profile": {
       "bundles": [
         "...",
-        "dsh-xxx"                                  // ② 登记：决定是否被加载
+        "dsh-xxx"                                  // (2) the registration: this decides whether it loads
       ]
     }
   }
@@ -197,11 +151,11 @@ dshmarket 认识 `file:` 依赖这点仍然成立：给「本地开发」角标�
 ```
 
 ```powershell
-# ③ 把包放进 profile 的 node_modules（file: 依赖其实是实体拷贝，不是软链）
-Copy-Item '<插件源码目录>\dsh-xxx' '<DSH_HOME>\profiles\<profile>\node_modules\dsh-xxx' -Recurse -Force
+# (3) put the package into the profile's node_modules (a file: dependency is a real copy, not a symlink)
+Copy-Item '<plugin source dir>\dsh-xxx' '<DSH_HOME>\profiles\<profile>\node_modules\dsh-xxx' -Recurse -Force
 ```
 
-然后**刷 pnpm 时间戳**（不刷 pnpm 可能认不出要重装）：
+Then **touch the pnpm timestamps** (without this pnpm may not realize anything has to be re-linked):
 
 ```powershell
 $prof='<DSH_HOME>\profiles\<profile>'; $now=Get-Date
@@ -210,124 +164,123 @@ $prof='<DSH_HOME>\profiles\<profile>'; $now=Get-Date
 (Get-Item "$prof\node_modules\.pnpm\lock.yaml").LastWriteTime = $now.AddSeconds(-30)
 ```
 
-**最后必须完全重启 DSH**（profile 改动只在启动时读）。
+**Finally you must fully restart DSH** (profile changes are only read at startup).
 
-### 3.5 汉化：登记完立刻做（2026-10-28 立 · 触发点就在这一步）
+### 3.5 Naming: do it immediately after registering (set 2026-10-28; the trigger is exactly this step)
 
-> **为什么单独立这一节**：2026-10-28 在鲸鱼娘区装 `dsh-session-shift`，安装报告里有「汉化」这一节，
-> 但做出来的是**纯中文名**（`"title": "会话交接"`）、**没有 en.json**、**没有 `包名（中文名）` 格式**，
-> 报告里也没出现 §收口 那行输出槽位。根因不是"忘了"，是**触发点设错**（旧触发要求"在设置列表里出现"，
-> 那要完全重启 + 人点开界面才观察得到，装插件的会话根本等不到）。
+> **Why this is its own section**: on 2026-10-28, installing `dsh-session-shift` produced an install report that had a "naming" section - but what came out was
+> a bare localized title (`"title": "Session Shift"` in one language only), **no en.json**, **no `package-name (localized name)` format**, and the output slot line
+> from the closing section was missing. The root cause was not forgetting; it was **the wrong trigger**: the old trigger said "once it shows up in the settings list",
+> which requires a full restart plus a human opening that page - a session that is installing plugins never gets to observe that.
 
-**触发 = 上面四步做完的那一刻**（`node_modules` 实体就位、时间戳已刷）。
-**不是**"等它出现在「设置 → 插件」列表里"。
+**Trigger = the moment the four steps above are done** (`node_modules` copy in place, timestamps touched).
+**Not** "wait until it appears in Settings -> Plugins".
 
-**做法**：把 `<包名>: "<中文名>"` 加进 `assets\titles.json`，跑一次汉化脚本
-（zh/en 一起写、exports/files 接线、源码目录同步、自检，全自动）：
+**How**: add `<package-name>: "<localized name>"` to `assets\titles.json`, then run the naming script once
+(it writes zh and en together, wires exports/files, syncs the source directory, self-checks - fully automatic):
 
 ```powershell
 $env:ELECTRON_RUN_AS_NODE='1'
-& '<DSH 安装目录>\DeepSeek Harness.exe' '<技能目录>\dsh-plugin-localization\scripts\dsh_plugin_title.mjs' `
-  --map '<技能目录>\dsh-plugin-localization\assets\titles.json'
+& '<DSH install dir>\DeepSeek Harness.exe' '<skills dir>\dsh-plugin-localization\scripts\dsh_plugin_title.mjs' `
+  --map '<skills dir>\dsh-plugin-localization\assets\titles.json'
 ```
 
-**四条判据（重启前就能全验完，不依赖界面）**：
-① `locale/zh.json` 与 `locale/en.json` 都在；
-② 两份都 `JSON.parse` 得过且 `meta.title` 非空；
-③ `zh.meta.title` = `<包名>（<中文名>）`，**全角括号** —— 纯中文名不合格（主人要「原名 + 中文」）；
-④ `package.json` 的 `exports` 有 `"./locale/*.json"`、`files` 有 `"locale"`。
+**Four criteria (all verifiable before a restart, no UI needed)**:
+1. both `locale/zh.json` and `locale/en.json` exist;
+2. both parse with `JSON.parse` and `meta.title` is not empty;
+3. `zh.meta.title` equals `<package-name>(<localized name>)` with **full-width parentheses** - a bare localized name fails (the author wants "original name + localized name");
+4. `package.json` has `"./locale/*.json"` in `exports` and `"locale"` in `files`.
 
-**重启后**再补一条复核：列表里看得见中文名 —— 这条只证明"被解析"，不算触发条件。
+**After the restart**, add one confirmation: the localized name is visible in the list. That line only proves "it was parsed"; it is not the trigger.
 
-### 3.6 交回单：落盘才算完（2026-10-28 立 · 落点含开源脱敏版）
+### 3.6 Hand in the receipt: it counts when it is on disk (set 2026-10-28; includes the sanitized public copy)
 
-**触发**：§3 登记 + §3.5 汉化做完。
+**Trigger**: section 3 registration + section 3.5 naming done.
 
-**动作**：按模板 `<你的模板目录>\install-receipt-template.md` 写回单，三个落点各司其职：
+**Action**: write the receipt from `<your template dir>\install-receipt-template.md`; three drop points, each with its own job:
 
-| 落点 | 内容 | 性质 |
+| Drop point | Content | Nature |
 |---|---|---|
-| `<工作区>\.dsh\install\<包名>-<YYYYMMDD-HHmm>.md` | **原件**：真实路径、审计原文、回滚命令 | 私有 |
-| `<工作区>\.dsh\install\latest.md` | 一行指针：相对路径 + 生成时间 | 私有 |
-| `<你的公开仓>\install-receipts\<包名>.md` | **脱敏版**：路径收敛到盘符级、去掉工作区名与账号名 | 公开 |
+| `<workspace>\.dsh\install\<package>-<YYYYMMDD-HHmm>.md` | **original**: real paths, verbatim audit output, rollback commands | private |
+| `<workspace>\.dsh\install\latest.md` | one pointer line: relative path + generation time | private |
+| `<your public repo>\install-receipts\<package>.md` | **sanitized**: paths collapsed to drive-letter level, workspace and account names removed | public |
 
-**公开版的三个状态**：`public: staged`（已落仓工作区、未提交）/ `public: pushed`（已提交且已推送）/
-`public: pending`（仓不可用，先落 `<你的内部存档>\install-receipts\`）。
-**提交与推送不归安装流程**（执行细则：由主人统一推）；回单只记 `staged`，主人推完改 `pushed`。
-落盘前先跑 `git -C <仓> status -sb`：工作区有别人的未提交改动时先提醒主人再落 —— **公开的是 GitHub 上那份，不是工作区那份**（D1）。
-**不许**把未脱敏内容放进公开仓（D2）。
+**Three states of the public copy**: `public: staged` (written into the repo working tree, not committed) / `public: pushed` (committed and pushed) /
+`public: pending` (repo unavailable, so parked in `<your internal archive>\install-receipts\`).
+**Committing and pushing are not part of the install procedure** (house rule: the author pushes them himself); the receipt records `staged`, and the author changes it to `pushed`.
+Before writing the public copy run `git -C <repo> status -sb`: if the working tree holds someone else's uncommitted changes, tell the author first - **what is public is the copy on GitHub, not the working tree** (D1).
+Never put un-sanitized content into the public repo (D2).
 
-**判据**：六节齐全（环境时间线 / 审计原文+退出码 / 登记五步 / 汉化四条判据 / 验证证据 / 回滚）；
-`latest.md` 指向的文件存在；验证段没有拿 `/api/*` 当证据；公开版的路径不含盘符级具体目录名。
+**Criteria**: six sections complete (environment timeline / verbatim audit output + exit code / the five registration steps / the four naming criteria / verification evidence / rollback);
+`latest.md` points at a file that exists; the verification section does not use `/api/*` as evidence; public-copy paths contain no concrete directory names below drive-letter level.
 
-**出口**：拿不到审计原文 → 贴命令 + 退出码；插件没客户端半边 → 验证段写「无界面项，看 `.active` 标记」；
-`package.json` 改坏 → `status: broken` + 说明回滚是否已执行。
+**Exits**: no audit output available -> paste the command + exit code; the plugin has no client half -> the verification section says "no UI item, look for the `.active` marker";
+`package.json` broken -> `status: broken` + whether the rollback already ran.
 
-**不许**：只在聊天里说「装好了」；回单留空字段；手写 `locale/*.json` 冒充汉化完成。
+**Never**: just say "installed" in chat; leave fields empty; hand-write `locale/*.json` and claim the naming step is done.
 
-### ⚠️ 绝对不要在 profile 目录手动跑 `pnpm install`（2026-10-21 炸过一次）
+### Do NOT run `pnpm install` by hand inside the profile directory (this wrecked a machine once, 2026-10-21)
 
-**症状**：跑完之后 DSH 起不来，报 `Cannot find package`，或者「1 required plugin did not activate」。
+**Symptom**: afterwards DSH does not start - `Cannot find package`, or "1 required plugin did not activate".
 
-**原因**：本机 profile 的 `pnpm-lock.yaml` 是**残缺**的（只覆盖部分包、没有完整 packages 段），
-而 `pnpm-workspace.yaml` 里是 `nodeLinker: hoisted`（扁平真实目录）。
-pnpm 按这份残缺 lock 做 hoisted 清理时，会**把不在 lock 里的包物理删除** ——
-2026-10-21 那次，profile 的 `@deepseek-ai` 包从 **306 个被删到只剩 36 个**
-（`cordis`、`dsh-subprocess`、`dsh-skill`、`dsh-base`、`dsh-web-app` 等核心层全没了）。
+**Cause**: this machine's profile `pnpm-lock.yaml` is **incomplete** (it covers only some packages and has no full `packages` section),
+while `pnpm-workspace.yaml` says `nodeLinker: hoisted` (a flat real directory tree).
+When pnpm prunes a hoisted layout against that incomplete lock, it **physically deletes packages that are not in the lock** -
+on 2026-10-21 the profile's `@deepseek-ai` packages went from **306 to 36**
+(`cordis`, `dsh-subprocess`, `dsh-skill`, `dsh-base`, `dsh-web-app` and the rest of the core layer were gone).
 
-**正确做法**：**只改 `package.json` + 手动复制目录 + 刷时间戳**（上面三步），
-**不要让 pnpm 去动 profile**。插件市场自己跑 pnpm 时是安全的（它会先修 lock），
-**手动跑就不一定**。
+**Correct procedure**: **edit `package.json` + copy the directory by hand + touch the timestamps** (the three steps above),
+**and never let pnpm touch the profile**. The plugin marketplace is safe when it runs pnpm itself (it fixes the lock first);
+**a manual run is not necessarily safe**.
 
-**如果 profile 已经被跑坏了**（核心包缺失）：从 `<备份区>\profile-@deepseek-ai-清理-*`
-把缺的包拷回去，**但注意**：拷回去后 profile 里会有宿主包副本 → 同一个库加载两份 →
-「设置 → 插件」启停插件会报 `profile reload requires the root Include entry`。
-**根治是清理副本**，见 `<备份区>\00_目录导引.md` 第 ① 条。
+**If the profile has already been wrecked this way** (core packages missing): copy them back from `<backup area>\profile-@deepseek-ai-cleanup-*`.
+**Note**: after copying, the profile holds a second copy of a host package -> the same library loads twice ->
+toggling plugins in Settings -> Plugins fails with `profile reload requires the root Include entry`.
+**The real fix is removing the duplicate**, see item 1 of `<backup area>\00_directory-guide.md`.
 
-## 4. 验证顺序（按这个顺序，不然会瞎猜）
+## 4. Verification order (in this order, or you will be guessing)
 
-1. `package.json` 能被 `JSON.parse` 解析（改坏了启动会直接出事）
-2. `dependencies` 里有它、`dsh.profile.bundles` 里有它（**CLI/UI 装完必看这两处**；没写全走 §3 兑底）
-3. `node_modules/<包名>/` 存在，且 `index.js` 在
-4. 重启后：插件列表里出现；或看插件自己写的激活标记（如 `<DSH_HOME>\<插件名>.active`）
-5. 有客户端半边的，刷新页面（部分需要重启）
+1. `package.json` parses with `JSON.parse` (a broken file kills startup outright)
+2. it is in `dependencies` and in `dsh.profile.bundles` (**after a CLI/UI install these two are the thing to look at**; if incomplete, use the fallback in section 3)
+3. `node_modules/<package>/` exists and `index.js` is in it
+4. after the restart: it appears in the plugin list, or you see the activation marker the plugin writes itself (`<DSH_HOME>\<plugin-name>.active`)
+5. if it has a client half, reload the page (some need a restart)
 
-## 5. 排查表
+## 5. Troubleshooting table
 
-| 现象 | 原因 | 处理 |
+| Symptom | Cause | Action |
 |---|---|---|
-| 装完没反应 | 没写 `dsh.profile.bundles` | 补上，重启 |
-| **`设置 → 插件` 里根本看不到这个插件**（登记都对、实体也在、重启过了） | **`locale/zh.json` 结构错了**：DSH 读 `meta.title` 取显示名 | **见 §5.1，这是最坑的一个** |
-| `error: not-bundle` | 缺 `dsh.bundle.patch` 声明 | 补 §2 那两处 |
-| 插件列表里有但没功能 | 缺 `files` 里的文件没被带上 | 复制整个目录，别只挑文件 |
-| 改了源码不生效 | 界面读的是 `node_modules` 的拷贝 | 改完两边同步 |
-| 路径报乱码 / 装不上 | 路径含中文 | 挪到纯英文路径 |
-| 重启后又被覆盖 | 官方会重新物化 `@deepseek-ai/*` | 那属于「易被冲刷的补丁」，见 AGENTS §0.7，配状态检查插件 |
+| nothing happens after install | `dsh.profile.bundles` not written | write it, restart |
+| **the plugin is simply not in Settings -> Plugins** (registration correct, files present, already restarted) | **`locale/zh.json` has the wrong structure**: DSH reads the display name from `meta.title` | **see 5.1 - the worst trap here** |
+| `error: not-bundle` | the `dsh.bundle.patch` declaration is missing | fix the two places in section 2 |
+| listed but does nothing | files listed in `files` were not actually shipped | copy the whole directory, not selected files |
+| source edits have no effect | the UI reads the copy in `node_modules` | sync both sides after editing |
+| path shows as garbage / install fails | path contains non-ASCII characters | move it to a pure-ASCII path |
+| overwritten again after a restart | the official updater re-materializes `@deepseek-ai/*` | that is "a patch the host may wash away", see AGENTS section 0.7 plus a state-check plugin |
 
-### 5.1 最大的坑：locale 文件的 `meta` 包裹
+### 5.1 The biggest trap: the locale file needs the `meta` wrapper
 
-**症状**：登记全对（`dependencies` 有、`bundles` 有、`node_modules` 实体在、语法没问题、
-`import` 成功、`apply` 是函数、slot 注册写法跟能跑的兄弟插件一模一样），
-**但插件在「设置 → 插件」列表里就是不出现**。**全程没有任何报错**，
-`cordis.patch.yml` 里的条目也是好的，插件管理器的「来源信息」里连它都没有。
+**Symptom**: registration is entirely correct (`dependencies` has it, `bundles` has it, the `node_modules` directory is real, syntax is fine,
+`import` succeeds, `apply` is a function, the slot registration is identical to a sibling plugin that works),
+**but the plugin never appears in Settings -> Plugins**. **No error anywhere.** The entries in `cordis.patch.yml` are fine too,
+and the plugin manager's "source information" does not even list it.
 
-**原因**：DSH 从 `package.json` 的 `exports["./locale/*.json"]` 读 locale，
-**显示名取自 `meta.title`**。写成 `{"name": ..., "description": ...}` 时
-`meta` 是 `undefined` → 标题为空 → **插件管理器把这一项过滤掉了**。
+**Cause**: DSH loads the locale through `exports["./locale/*.json"]` in `package.json`, and **takes the display name from `meta.title`**.
+Written as `{"name": ..., "description": ...}`, `meta` is `undefined` -> the title is empty -> **the plugin manager filters that entry out**.
 
-**正确形态**（全机所有插件都是这个结构，`dsh-client-locale` 的 `client.js` 里有
-`schema.meta ||= {}`，说明 `meta` 是必需字段）：
+**Correct shape** (every plugin on the machine uses this structure; `client.js` of `dsh-client-locale` contains `schema.meta ||= {}`,
+which shows `meta` is a required field):
 
 ```jsonc
 {
   "meta": {
-    "title": "示例插件（中文名）",     // ← 显示名，插件列表里显示的就是它
-    "description": "一句话说明这个插件干什么"
+    "title": "example plugin (localized name)",     // <- the display name shown in the plugin list
+    "description": "one line about what this plugin does"
   }
 }
 ```
 
-**怎么自查**（一条命令，比逐个排查快得多）：
+**Self-check** (one command, much faster than working through the list):
 
 ```powershell
 $prof = '<DSH_HOME>\profiles\<profile>'
@@ -335,94 +288,85 @@ Get-ChildItem "$prof\node_modules" -Directory | ForEach-Object {
   $z = Join-Path $_.FullName 'locale\zh.json'
   if (Test-Path $z) {
     $o = Get-Content $z -Raw | ConvertFrom-Json
-    if ($null -eq $o.meta) { '缺 meta: ' + $_.Name }   # ← 这些插件会不出现在列表里
+    if ($null -eq $o.meta) { 'missing meta: ' + $_.Name }   # <- these plugins silently vanish from the list
   }
 }
 ```
 
-**教训**：`exports["./locale/*.json"]` 写对了、`files` 里有 `locale` 目录、
-文件也真的拷过去了——**这些都不能证明 locale 会被正确解析**。
-唯一可靠的判据是 `meta.title` 能被读出来。
-**写插件时直接拄一个能跑的兄弟插件的 locale 文件，别凭直觉设计结构。**
+**Lesson**: `exports["./locale/*.json"]` written correctly, `locale` present in `files`, the file really copied - **none of those prove the locale will be parsed.**
+The only reliable criterion is that `meta.title` can actually be read out.
+**When writing a plugin, copy the locale file of a sibling plugin that works; do not design the structure from intuition.**
 
-### 5.2 附：`.active` 激活标记（判断「宿主半边有没有跑起来」）
+### 5.2 Note: the `.active` marker (how to tell whether the host half ran at all)
 
-插件可以在自己的 `apply()` 里往 `DSH_HOME` 写一个激活标记文件：
+A plugin can write an activation marker into `DSH_HOME` from inside its own `apply()`:
 
 ```js
 try {
-  writeFileSync(join(dshHome(), '<插件名>.active'), new Date().toISOString(), 'utf8')
-} catch { /* 写不了不影响主功能 */ }
+  writeFileSync(join(dshHome(), '<plugin-name>.active'), new Date().toISOString(), 'utf8')
+} catch { /* failing to write it must not break the real feature */ }
 ```
 
-**用法**：卡片看不见、或怀疑宿主半边没加载时，看这个文件在不在
-（`<DSH_HOME>\<插件名>.active`）——**比翻日志快**，因为 DSH 的运行日志
-在 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\` 里**只有崩溃转储，没有运行日志**。
+**Use**: when the card is not visible, or you suspect the host half never loaded, check whether `<DSH_HOME>\<plugin-name>.active` exists -
+**faster than reading logs**, because DSH's runtime logs under `%APPDATA%\@deepseek-ai\dsh-desktop\logs\`
+**contain crash dumps only, no runtime logging**.
 
-**注意**：`.active` 是**插件自己写的**，不是 DSH 写的。没写这个文件的插件
-（比如某个自写的守卫类插件）**没有标记 ≠ 没加载**，别据此下结论。
+**Careful**: `.active` is written **by the plugin**, not by DSH. A plugin that does not write such a file
+(for example a hand-written guard plugin) has **no marker even when loaded** - do not conclude from its absence.
 
-### 5.3 附：本机 profile 的 node_modules 是「平铺拷贝」，不是 pnpm 布局
+### 5.3 Note: this machine's profile `node_modules` is a flat copy, not a pnpm layout
 
-实测（2026-10-22）：`<DSH_HOME>\profiles\<profile>\node_modules\.pnpm` **是空的**，
-`node_modules` 下全是普通目录（`LinkType` 为空），`pnpm-lock.yaml` 与
-`.modules.yaml` 里**查不到本机的 file: 插件**。
+Measured (2026-10-22): `<DSH_HOME>\profiles\<profile>\node_modules\.pnpm` **is empty**, everything under `node_modules` is a plain directory
+(`LinkType` empty), and neither `pnpm-lock.yaml` nor `.modules.yaml` **contains this machine's `file:` plugins**.
 
-**所以这些 pnpm 判据在此环境全部不适用**：
-「lockfile 里有没有这个包」「`.modules.yaml` 有没有登记」「`.pnpm` 里有没有它」
-——**都不能用来判断插件是否被 DSH 加载**。真正要看的是
-`package.json` 的 `dsh.profile.bundles` + `node_modules` 实体 + locale 的 `meta.title`。
+**So these pnpm-based criteria do not apply in this environment at all**:
+"is the package in the lockfile", "is it registered in `.modules.yaml`", "is it under `.pnpm`" -
+**none of them tells you whether DSH loaded the plugin**. What actually matters is
+`dsh.profile.bundles` in `package.json` + the real directory in `node_modules` + `meta.title` in the locale.
 
+## 6. When to do this and when not to
 
-## 6. 什么时候该做、什么时候别做
-
-- **该做**：插件是自己的、市场没有、需要长期用。
-- **别做**：能走 dshmarket 就走市场（它自动做①②④，还能检查更新）——**但先审这个插件**（§0.0）；市场装不出来的才手改登记。
-- **别做的事**：为"装本地插件"写自动化脚本 / 开机自动跑。频率极低（一年几次），
-  自动化反而会在启动时改写 profile、把手工改动打回去。**一次性手工 + 技能文档足矣。**
+- **Do it**: the plugin is yours, the marketplace does not have it, you will use it long term.
+- **Don't**: if dshmarket can install it, use dshmarket (it does steps 1, 2 and 4 automatically and checks updates) - **but audit that plugin first** (section 0.0). Manual registration is only for what the marketplace cannot install.
+- **Do not**: build an automation or a boot script for "installing local plugins". It happens a few times a year, and an automation would rewrite the profile at startup and push the hand-made edits back.
+  **One manual pass plus this document is enough.**
 
 ---
 
-## 收口 · 装完必做：随手汉化（有触发、有输出槽位）
+## Closing - after every install: name it (has a trigger, has an output slot)
 
-> 2026-10-26 立。**为什么单独立一节**：汉化这件事以前只写在技能 `dsh-plugin-localization` 里，
-> 它是「什么时候想起来就去做」的被动条目 —— 结果就是装完一堆插件、列表里全是英文，
-> 下次还得回头补。**触发条件解决「该不该发生」，输出槽位解决「发不发生」，缺一个就归零**（同 S1c）。
+> Set 2026-10-26. **Why this is its own section**: naming used to live only in the skill `dsh-plugin-localization`,
+> which is a passive item - "do it whenever someone remembers". The result was a pile of installed plugins with English-only names in the list,
+> to be fixed later. **A trigger decides whether it should happen; an output slot decides whether it does happen. Missing either one zeroes it out** (same as S1c).
 
-### 触发（什么时候必须做）
+### Trigger (when this is mandatory)
 
-**登记完（§3 三步 + 刷时间戳）的那一刻就做 —— 见 §3.5。** 不等完全重启、不等「出现在设置列表里」、
-不等主人说「这个名字看不懂」；同一次任务里做完，不留到下一个会话。
+**Do it the moment registration is finished (section 3's three steps + touched timestamps) - see 3.5.** Do not wait for a full restart, do not wait until it shows up in the settings list,
+do not wait for the author to say "I cannot read this name". Finish it inside the same task, do not leave it for the next session.
 
-> **2026-10-28 修正**：旧触发写的是"插件一装进 profile 并在「设置 → 插件」里出现"。
-> 那个事件要**完全重启 + 人点开设置界面**才成立，装插件的会话观察不到 → 条件永不成立、收尾永不执行
-> （实测：鲸鱼娘区装 `dsh-session-shift`，只留了纯中文名、没 en.json、没槽位行）。
-> 现在"出现在列表里"降级为**重启后的复核**，不再是触发条件。
+> **Corrected 2026-10-28**: the old trigger was "once the plugin is inside the profile and shows up in Settings -> Plugins".
+> That event needs a full restart **plus a human opening the settings page**, so the installing session can never observe it -> the condition never becomes true and the closing step never runs
+> (measured: installing `dsh-session-shift` left a bare localized name, no en.json, no slot line).
+> "Appears in the list" is now downgraded to **a confirmation after the restart**, not the trigger.
 
-### 输出槽位（做完必须写出来的那一行）
+### Output slot (the one line that must be written when it is done)
 
-安装完成的汇报里，**必须出现这一行**（原样，不写就是没做完）：
+The completion report **must contain this line** (verbatim; if it is not written, the work is not done):
 
 ```
-插件显示名：<dsh-xxx> → <中文名>（locale/zh.json 已就位，meta.title 读得出来 ✅）
+plugin display name: <dsh-xxx> -> <localized name> (locale/zh.json in place, meta.title readable OK)
 ```
 
-三个判据缺一不可：**① 文件在**（`locale/zh.json` 与 `locale/en.json`）、
-**② 接上了**（`package.json` 的 `exports["./locale/*.json"]` 与 `files` 里有 `locale`）、
-**③ 真的被解析**（`meta.title` 读得出来 —— 这只有刷新列表看到中文名才算数，写对导出不算）。
+Three criteria, none optional: **1 the files exist** (`locale/zh.json` and `locale/en.json`),
+**2 they are wired** (`exports["./locale/*.json"]` and `locale` in `files`),
+**3 it is really parsed** (`meta.title` reads out - that only counts once the list shows the localized name; a correct export on its own does not).
 
-### 只有这两种情况可以跳过
+### Only two cases may skip it
 
-1. 这个插件**本来就是中文/自带 locale**（先看 `locale/zh.json` 是否存在，别凭猜）；
-2. 主人明确说「这个名字不用改」。
+1. the plugin **already ships a localized name / its own locale** (check whether `locale/zh.json` exists; do not guess);
+2. the author explicitly says "do not change this name".
 
-跳过也要在汇报里写一句 `插件显示名：<dsh-xxx> 跳过（原因：…）` —— **槽位不能整块消失**。
+Even then the report must carry `plugin display name: <dsh-xxx> skipped (reason: ...)` - **the slot may never disappear as a whole**.
 
-> 具体怎么做（文件结构、`meta.title` 缺 `meta` 包裹会被静默过滤、exports 接线、刷新不生效怎么排查）
-> → 技能 **`dsh-plugin-localization`**。这一节只管「什么时候做 + 做完要交什么」。
-
-
-
-
-
-
+> How exactly to do it (file structure, a `meta.title` without the `meta` wrapper gets silently filtered, wiring exports, what to check when the list does not refresh)
+> -> skill **`dsh-plugin-localization`**. This section only decides **when it must happen and what it must produce**.
