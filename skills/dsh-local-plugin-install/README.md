@@ -2,7 +2,7 @@
 
 ### Install a local source plugin into DeepSeek Harness
 
-In one line: **a local plugin does not need to be "installed", it needs to be "registered".** The files are already on your disk; what is missing is telling the host "this thing exists, load it".
+In one line: **a local plugin does not need to be "installed", it needs to be "registered."** The files are already on your disk; what is missing is telling the host "this thing exists, load it".
 
 ---
 
@@ -55,4 +55,4 @@ Text **CC BY 4.0**, code **MIT**, as declared by [`LICENSE`](../../LICENSE) and 
 
 ---
 
-Author: **鱼人判庭虚之理** (Yuren the Fool) - file created 2026-11-02
+Author: **鱼人判庭虚之理** (YU-panting) - file created 2026-11-02
