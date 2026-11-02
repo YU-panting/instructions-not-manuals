@@ -15,7 +15,7 @@
 > **机制**：文件以「指令」身份进上下文，实测输出以「工具结果」身份进上下文，后者的权重被训练得更低。  
 > **所以这不是模型不听话，是身份不对等。** 这一句是本仓库所有内容的起点。
 
-**作者**：鱼人判庭虚之理（B 站同名）｜ git 提交署名：Yuren the Fool  
+**作者**：鱼人判庭虚之理（B 站同名）｜ git 提交署名：YU-panting  
 **来历**：1024 造物挑战参赛作品；全部案例出自作者本人在 WorkBuddy（腾讯）里的真实实战，不是教学示例。  
 **AI 协力**：本仓库的复盘正文由 AI 起草——文中第一人称「我」是 AI，不是作者本人；事例、判断、取舍与定稿由作者负责。这不是代笔：每个事故都出自真实过程，只是落笔的是它。
 
@@ -164,18 +164,22 @@ node scripts/sync-essentials.example.mjs \
 | **写卡与验卡的四条**            | [`battle-archive/03-写卡与验卡的四条.md`](battle-archive/03-写卡与验卡的四条.md) —— 祈使句换条件句、可指认、干净对话验卡、收口式补卡                |
 | **一条纪律：别打掉别人的卡**        | [`battle-archive/04-别打掉别人的卡.md`](battle-archive/04-别打掉别人的卡.md)                                              |
 | **能跑的体检器**              | [`battle-archive/tools/指令文件体检器.html`](battle-archive/tools/指令文件体检器.html) —— 单文件、零依赖、双击就开                    |
-| **发布前冒烟**               | [`battle-archive/tools/指令文件体检器-冒烟测试.js`](battle-archive/tools/指令文件体检器-冒烟测试.js) —— 跑法见下方「三个工具怎么跑」                    |
+| **发布前冒烟**               | [`battle-archive/tools/指令文件体检器-冒烟测试.js`](battle-archive/tools/指令文件体检器-冒烟测试.js) —— 跑法见下方「五个工具怎么跑」                    |
 | **防漂移同步脚本（示例）**         | [`scripts/sync-essentials.example.mjs`](scripts/sync-essentials.example.mjs) —— 文件名带 `example`，需按自己的路径改过才能跑 |
+| **对外发布物检查（脱敏闸）**        | [`battle-archive/tools/对外发布物检查.js`](battle-archive/tools/对外发布物检查.js) —— 发布前给**单个文件**过一遍：本地路径/凭据字样/商业化表述 + 必含要素 + 字数 + 链接真连 |
+| **装本地源码插件（DSH）**        | [`skills/dsh-local-plugin-install/`](skills/dsh-local-plugin-install/) —— 技能包：主文档 + 装前静态审计脚本 + 四类症状自检表    |
 
-### 三个工具怎么跑
+### 五个工具怎么跑
 
-都有用法，但**跑法各不相同**，照着下面这行抄，别猜：
+都有用法，但**跑法各不相同**，照着下面各自的行抄，别猜：
 
 | 工具 | 命令 | 注意 |
 | --- | --- | --- |
 | 体检器（网页版） | **双击** `battle-archive/tools/指令文件体检器.html` | 单文件、零依赖，不用装任何东西、不用起服务 |
 | 发布前冒烟 | `cd battle-archive/tools && node 指令文件体检器-冒烟测试.js` | ⚠️ **必须先 `cd` 进 `tools/` 目录**——脚本默认读同目录的 HTML，在仓库根直接跑会报 `ENOENT`。也可以显式传路径：`node battle-archive/tools/指令文件体检器-冒烟测试.js battle-archive/tools/指令文件体检器.html` |
 | 防漂移同步脚本 | `node scripts/sync-essentials.example.mjs --source <源文件> --target <目标1> [目标2 ...]` | 需 Node 18+；**示例版**，路径要按自己的改；**必须带 `--source` 和 `--target`**，不带会直接报参数错误；加 `--check` 只查不写（退出码 `0` 一致 / `1` 有漂移或缺段 / `2` 参数或源文件有问题） |
+| 对外发布物检查 | `node battle-archive/tools/对外发布物检查.js <文件> [--need "必含,逗号"] [--range 最小,最大] [--url 链接]` | 需 **Node 18+**（脚本用全局 `fetch`，低版本没有）；一次只查**一个文件**，多文件要逐个传；退出码 `0` 绿灯可发 / `2` 有未过项。⚠️ 它第一条红线（查本地路径）会把 JS 源码里的**正则字面量**误报成路径——命中行里若出现「字母紧跟冒号紧跟反斜杠」那种就是假阳性，不是泄露 |
+| 装前审计（插件包） | `node skills/dsh-local-plugin-install/audit-plugin-package.cjs <包目录或 .tgz>` | 需 **Node 16+**；解 `.tgz` 依赖 Windows 10+ 自带 `tar.exe`（Linux/macOS 先自己解包、只传目录）；**不设 `DSH_PROFILE_DIR` 就跳过「本机宿主版本对照」与「profile patch 撞车」两节**，并因此给出退出码 `1`（有条件）；`0` 可装 / `1` 有条件 / `2` 拒绝 |
 
 冒烟脚本的退出码：`0` 全过，`2` 有失败（按钮点不动 / 口径不同步 / 同级 md 写死了计数）。
 它防的是这一类事：改了规则表却忘了改正文里写死的数字——页脚还在说「N 项」、治理建议还说「N 条」。
@@ -218,3 +222,4 @@ node scripts/sync-essentials.example.mjs \
 这个包，是一个 9 年义务教育 2B 人的飞行记录：想飞，必须飞，以及准备坠落。
 
 **你又是谁？**
+
